@@ -14,6 +14,7 @@ interface ISubscriptionService {
     struct Provider {
         address owner;
         uint256 fee;
+        uint256 balance;
         bool isActive;
     }
 
@@ -63,16 +64,14 @@ interface ISubscriptionService {
     function registerSubscriber(uint256[] memory providers, uint256 depositAmt) external returns (uint256);
     // function increaseDeposit(uint256 amt) external;
     function unregisterProvider(uint256 providerId) external;
-    function deactivateProvider(uint256 providerId) external;
+    function changeProviderStatus(uint256 providerId) external;
     function subscribe(uint256 providerId, uint256 depositAmt) external;
     function unsubscribe(uint256 providerId) external;
-    function collectEarnings() external;
+    function collectEarnings(uint256 providerId) external;
 
     // Getters
-    function getProvider(uint256 providerId) external view returns (uint256, uint256, bool);
-    function getSubscriber(uint256 subscriberId) external view returns (uint256, uint256, uint256, bool);
-    function getProviderBalance(uint256 providerId) external view returns (uint256);
+    function getProviderData(uint256 providerId) external view returns (uint256, uint256, address, uint256, bool);
+    function getSubscriberData(uint256 subscriberId) external view returns (address, uint256);
     function getProviderEarnings(uint256 providerId) external view returns (uint256);
-    function getSubscriberBalance(uint256 subscriberId) external view returns (uint256);
     function getSubscriberDepositValueUSD(uint256 subscriberId) external view returns (uint256);
 }
