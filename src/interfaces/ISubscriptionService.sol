@@ -5,12 +5,6 @@ interface ISubscriptionService {
     ////////////////////////
     ///// STRUCTS /////
     ////////////////////////
-
-    /**
-     * 1. Check if a subscriber ID is subscribed to a provider ID: mapping(uint256 subscriberId => mapping(uint256
-     * providerId => Subscription)) providerSubscribers;
-     *     2.
-     */
     struct Provider {
         address owner;
         uint256 fee;
@@ -22,11 +16,12 @@ interface ISubscriptionService {
         address owner;
         uint256 currentBalance;
         uint256 totalDeposits;
-        Provider[] providers;
     }
 
     struct Subscription {
-        uint48 lastBillingTs;
+        uint48 startTime;
+        uint48 endTime;
+        uint48 pausedAt;
         bool paused;
     }
 
@@ -34,6 +29,10 @@ interface ISubscriptionService {
     ///// EVENTS /////
     ////////////////////////
 
+    event DepositIncreased(uint256 subscriberId, address owner, uint256 amount);
+    event ProviderStatusChanged(uint256 providerId, bool status);
+    event EarningsCollected(uint256 providerId, uint256 amount);
+    event EarningsWithdrawn(uint256 providerId, uint256 amount, uint256 usdValue);
     event ProviderRegistered(uint256 providerId, address owner, uint256 fee);
     event SubscriberRegistered(uint256 subscriberId, address owner, uint256 depositAmt);
     event ProviderUnregistered(uint256 providerId, address owner);
@@ -63,7 +62,7 @@ interface ISubscriptionService {
     function registerProvider(bytes32 key, uint256 fee) external returns (uint256);
     function registerSubscriber(uint256[] memory providers, uint256 depositAmt) external returns (uint256);
     // function increaseDeposit(uint256 amt) external;
-    function unregisterProvider(uint256 providerId) external;
+    function removeProvider(uint256 providerId) external;
     function changeProviderStatus(uint256 providerId) external;
     function subscribe(uint256 providerId, uint256 depositAmt) external;
     function unsubscribe(uint256 providerId) external;
