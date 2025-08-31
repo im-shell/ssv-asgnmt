@@ -146,7 +146,9 @@ contract SubscriptionServiceTest is Test {
         uint256 depositAmount = providerFee * 3;
         uint256 subscriberId = _registerSubscriber(subscriber1, providers, depositAmount);
 
-        assertEq(subscriptionService.getProviderEarnings(providerId), providerFee, "Provider should start with 0 earnings");
+        assertEq(
+            subscriptionService.getProviderEarnings(providerId), providerFee, "Provider should start with 0 earnings"
+        );
 
         _skipTime(BILLING_PERIOD + 1 seconds);
 
@@ -181,7 +183,7 @@ contract SubscriptionServiceTest is Test {
         subscriptionService.processAllSubscriptions(providerId);
     }
 
-    function testCollectEarnings_InsufficientFunds_PausesSubscription() public {}
+    function testCollectEarnings_InsufficientFunds_PausesSubscription() public { }
 
     function testFuzz_RegisterProvider_Success(bytes32 registrationKey, uint256 providerFee) public {
         // Bound the provider fee to valid range (minimum $50 USD equivalent to 10x minimum)
