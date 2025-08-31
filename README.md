@@ -28,6 +28,7 @@ The trickiest part of the whole architecture. Here the main challenge for me was
     - If the provider does not run the function at the start of each month then there is a possibility that the amount will not deduct from the user's balance after a point. Maybe, due to lack of funds in the user's account.
 6. There was a problem that the subscribers could be a very big number and processing subscription for each of them would be difficult by running a loop for all of them at once - so I added a batch processing function that can be leveraged to not go over the block gas limit (30M).
 7. When the subscription is paused the user has to explicitely `resumeSubscription` in which the user would have to add funds to a specific subscription and the amount immediately credits to the provider. Just like how it happens in the `registerSubscriber()` function.
+8. About transferring tokens in the contract to increase the balance - that is not possible until the token implements hooks like ERC777.
 
 ### Cons of my approach:
 
@@ -37,6 +38,12 @@ The trickiest part of the whole architecture. Here the main challenge for me was
 
 ### Upgradeability and getting rid of it
 Used UUPS upgradeability because it's easy to remove the functions in the next implementation of the upgrade and get rid of the upgradeability truly. We could also use Transparent proxy and just set the admin to zero address to remove upgradeability but this also works and is used more widely since in UUPS you don't have to manage admin functions and the deployment cost is lesser.
+
+### Possible Enhancements
+- Add features for subscribing or unsubscribing to a provider
+- Allow the provider to change the fee with TimeController
+- **Modularity**: We can create a `ValidationModule` and move the validations related to Oracle validations outside of the contract
+-
 
 ## Alternate Solutions that I thought of:
 ### #1: Prepaid Subscriptions
