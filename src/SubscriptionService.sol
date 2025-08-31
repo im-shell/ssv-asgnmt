@@ -188,7 +188,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     /**
      * @notice Collect the earnings of a provider from all active subscriptions
      * @dev This function is supposed to be called every month by the providers, if they don't call then
-     * there may be a chance that they lose their earnings for the month they didn't charge.
+     * there may be a chance that they lose their earnings for the month they didn't charged.
      * @param providerId The ID of the provider
      */
     function collectEarnings(uint256 providerId) public onlyProvider(providerId) {
@@ -207,32 +207,68 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         // Process each subscription to calculate earnings
         for (uint256 i = 0; i < subscriberIds.length;) {
             uint256 subscriberId = subscriberIds[i];
-            Subscription storage subscription = $.subscriptions[subscriberId][providerId];
-
-            (uint256 earnings, uint256 monthsPassed, uint256 userBalance) = _calculateSubscriptionEarnings(
-                subscription, providerFee, currentTime, $.subscribers[subscriberId].currentBalance
-            );
-
-            // Check if user has sufficient balance
-            if (earnings > 0) {
-                if (userBalance < earnings) {
-                    // Pause subscription if insufficient funds
-                    subscription.paused = true;
-                    subscription.pausedAt = uint48(currentTime);
-                } else {
-                    uint256 startTime = subscription.startTime + (monthsPassed * BILLING_PERIOD);
-                    subscription.startTime = uint48(startTime);
-                    subscription.endTime = uint48(startTime + BILLING_PERIOD);
-                }
-                totalEarnings += earnings;
-                $.subscribers[subscriberId].currentBalance -= earnings;
-            }
+            totalEarnings += _processSubscriptionEarnings(subscriberId, providerId, providerFee, currentTime);
 
             unchecked {
                 ++i;
             }
         }
 
+        if (totalEarnings > 0) {
+            $.providers[providerId].balance += totalEarnings;
+        }
+
+        emit EarningsCollected(providerId, totalEarnings);
+    }
+
+    /**
+     * @notice Collect earnings from a batch of subscribers for a provider
+     * @dev This function processes subscribers in batches to avoid gas limit issues
+     * @param providerId The ID of the provider
+     * @param startIndex The starting index in the subscriber list
+     * @param batchSize The number of subscribers to process in this batch
+     * @return totalEarnings The total earnings collected from this batch
+     * @return nextStartIndex The next index to start from (0 if all processed)
+     * @return isComplete Whether all subscribers have been processed
+     */
+    function collectEarningsBatch(
+        uint256 providerId,
+        uint256 startIndex,
+        uint256 batchSize
+    )
+        external
+        onlyProvider(providerId)
+        returns (uint256 totalEarnings, uint256 nextStartIndex, bool isComplete)
+    {
+        SubscriptionServiceStorage storage $ = _getStorage();
+
+        {
+            uint256[] memory subscriberIds = $.providerSubscribers[providerId].values();
+            if (subscriberIds.length == 0 || startIndex >= subscriberIds.length) {
+                emit EarningsCollected(providerId, 0);
+                return (0, 0, true);
+            }
+
+            // end index calculation
+            uint256 endIndex =
+                startIndex + batchSize > subscriberIds.length ? subscriberIds.length : startIndex + batchSize;
+
+            // Processing the batch
+            uint256 fee = $.providers[providerId].fee;
+            for (uint256 i = startIndex; i < endIndex;) {
+                totalEarnings += _processSubscriptionEarnings(subscriberIds[i], providerId, fee, block.timestamp);
+
+                unchecked {
+                    ++i;
+                }
+            }
+
+            // state changs
+            isComplete = endIndex >= subscriberIds.length;
+            nextStartIndex = isComplete ? 0 : endIndex;
+        }
+
+        // Update provider balance if earnings were collected
         if (totalEarnings > 0) {
             $.providers[providerId].balance += totalEarnings;
         }
@@ -312,6 +348,14 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     }
 
     /**
+     * @notice Set the price feed contract address
+     * @param _priceFeed The address of the price feed contract
+     */
+    function setPriceFeed(address _priceFeed) external onlyOwner {
+        _getStorage().priceFeed = AggregatorV3Interface(_priceFeed);
+    }
+
+    /**
      * @notice Subscribe to a provider
      * @param providerId The ID of the provider
      * @param depositAmt The amount of deposit in WETH
@@ -376,6 +420,27 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     }
 
     /**
+     * @notice Get the total number of subscribers for a provider
+     * @param providerId The ID of the provider
+     * @return count The number of subscribers
+     */
+    function getProviderSubscriberCount(uint256 providerId) external view returns (uint256 count) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        return $.providerSubscribers[providerId].length();
+    }
+
+    /**
+     * @notice Get recommended batch size based on gas limit considerations
+     * @dev This is a view function that suggests an optimal batch size
+     * @return batchSize Recommended batch size for batch processing
+     */
+    function getRecommendedBatchSize() external pure returns (uint256 batchSize) {
+        // A rough estimate, should be calculatedd based on the processing functions's
+        // cost and the gas limit
+        return 50;
+    }
+
+    /**
      * @notice Returns the data of a provider
      * @param providerId The ID of the provider
      * @return subscriberCount The number of subscribers
@@ -410,6 +475,49 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     ////////////////////////////////////////////////////////
 
     /**
+     * @dev Process earnings for a single subscription and update state
+     * @param subscriberId The ID of the subscriber
+     * @param providerId The ID of the provider
+     * @param providerFee The provider's fee per billing period
+     * @param currentTime Current block timestamp
+     * @return earnings The calculated earnings for this subscription
+     */
+    function _processSubscriptionEarnings(
+        uint256 subscriberId,
+        uint256 providerId,
+        uint256 providerFee,
+        uint256 currentTime
+    )
+        private
+        returns (uint256 earnings)
+    {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        Subscription storage subscription = $.subscriptions[subscriberId][providerId];
+
+        (uint256 calculatedEarnings, uint256 monthsPassed, uint256 userBalance) = _calculateSubscriptionEarnings(
+            subscription, providerFee, currentTime, $.subscribers[subscriberId].currentBalance
+        );
+
+        // Check if user has sufficient balance and process earnings
+        if (calculatedEarnings > 0) {
+            if (userBalance < calculatedEarnings) {
+                // Pause subscription if insufficient funds
+                subscription.paused = true;
+                subscription.pausedAt = uint48(currentTime);
+            } else {
+                // Update subscription billing period
+                uint256 startTime = subscription.startTime + (monthsPassed * BILLING_PERIOD);
+                subscription.startTime = uint48(startTime);
+                subscription.endTime = uint48(startTime + BILLING_PERIOD);
+            }
+
+            // Deduct earnings from subscriber balance
+            $.subscribers[subscriberId].currentBalance -= calculatedEarnings;
+            earnings = calculatedEarnings;
+        }
+    }
+
+    /**
      * @dev Calculate earnings for a single subscription
      * @param subscription The subscription to calculate earnings for
      * @param providerFee The provider's fee per billing period
@@ -424,6 +532,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         uint256 userBalance
     )
         private
+        view
         returns (uint256 earnings, uint256 monthsPassed, uint256 remainingBalance)
     {
         uint256 billingEndTime = subscription.endTime;
@@ -462,19 +571,19 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     }
 
     function _isValidProviderFee(uint256 _fee) internal view returns (bool) {
-        return Math.mulDiv(_fee, getUSDValueOfToken(_fee), 10 ** 18) >= MIN_FEE;
+        return getUSDValueOfToken(_fee) >= MIN_FEE;
     }
 
     function _isValidSubscriberDeposit(uint256 _deposit) internal view returns (bool) {
-        return Math.mulDiv(_deposit, getUSDValueOfToken(_deposit), 10 ** 18) >= MIN_DEPOSIT;
+        return getUSDValueOfToken(_deposit) >= MIN_DEPOSIT;
     }
 
     function _generateProviderId() private returns (uint256) {
-        return _getStorage().nextProviderId++;
+        return ++_getStorage().nextProviderId;
     }
 
     function _generateSubscriberId() private returns (uint256) {
-        return _getStorage().nextSubscriberId++;
+        return ++_getStorage().nextSubscriberId;
     }
 
     function _getStorage() private pure returns (SubscriptionServiceStorage storage $) {
