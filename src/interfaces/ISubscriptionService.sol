@@ -6,10 +6,11 @@ interface ISubscriptionService {
     ///// STRUCTS /////
     ////////////////////////
     struct Provider {
+        // storage packing: 3 slots
         address owner;
+        bool isActive;
         uint256 fee;
         uint256 balance;
-        bool isActive;
     }
 
     struct Subscriber {
@@ -19,6 +20,7 @@ interface ISubscriptionService {
     }
 
     struct Subscription {
+        // storage packing: 1 slot
         uint48 startTime;
         uint48 endTime;
         uint48 pausedAt;
