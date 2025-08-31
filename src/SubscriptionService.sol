@@ -457,6 +457,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
      */
     function getProviderEarnings(uint256 providerId) external view returns (uint256) {
         SubscriptionServiceStorage storage $ = _getStorage();
+        // todo: clarify if this is what should be returned
         return $.providers[providerId].balance;
     }
 
@@ -490,7 +491,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
      * @return balance The balance of the provider
      * @return isActive The status of the provider
      */
-    function getProviderData(uint256 providerId) external view returns (uint256, uint256, address, uint256, bool) {
+    function getProvider(uint256 providerId) external view returns (uint256, uint256, address, uint256, bool) {
         SubscriptionServiceStorage storage $ = _getStorage();
         Provider memory provider = $.providers[providerId];
 
@@ -503,8 +504,15 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         );
     }
 
-    function getSubscriberData(uint256 subscriberId) external view returns (address, uint256) {
+    /**
+     * @notice Get the data of a subscriber
+     * @param subscriberId The ID of the subscriber
+     * @return owner The owner of the subscriber
+     * @return balance The balance of the subscriber
+     */
+    function getSubscriber(uint256 subscriberId) external view returns (address, uint256) {
         // Returns owner, balance, plan and state
+        // todo: clarify what is `plan` and `state`
         SubscriptionServiceStorage storage $ = _getStorage();
         Subscriber memory subscriber = $.subscribers[subscriberId];
 
