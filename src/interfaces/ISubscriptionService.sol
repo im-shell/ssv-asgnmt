@@ -67,10 +67,19 @@ interface ISubscriptionService {
     function subscribe(uint256 providerId, uint256 depositAmt) external;
     function unsubscribe(uint256 providerId) external;
     function collectEarnings(uint256 providerId) external;
+    function collectEarningsBatch(
+        uint256 providerId,
+        uint256 startIndex,
+        uint256 batchSize
+    )
+        external
+        returns (uint256 totalEarnings, uint256 nextStartIndex, bool isComplete);
 
     // Getters
     function getProviderData(uint256 providerId) external view returns (uint256, uint256, address, uint256, bool);
     function getSubscriberData(uint256 subscriberId) external view returns (address, uint256);
     function getProviderEarnings(uint256 providerId) external view returns (uint256);
     function getSubscriberDepositValueUSD(uint256 subscriberId) external view returns (uint256);
+    function getProviderSubscriberCount(uint256 providerId) external view returns (uint256);
+    function getRecommendedBatchSize() external pure returns (uint256);
 }
