@@ -80,8 +80,8 @@ interface ISubscriptionService {
         returns (uint256 totalEarnings, uint256 nextStartIndex, bool isComplete);
 
     // Getters
-    function getProviderData(uint256 providerId) external view returns (uint256, uint256, address, uint256, bool);
-    function getSubscriberData(uint256 subscriberId) external view returns (address, uint256);
+    function getProvider(uint256 providerId) external view returns (uint256, uint256, address, uint256, bool);
+    function getSubscriber(uint256 subscriberId) external view returns (address, uint256);
     function getProviderEarnings(uint256 providerId) external view returns (uint256);
     function getSubscriberDepositValueUSD(uint256 subscriberId) external view returns (uint256);
     function getProviderSubscriberCount(uint256 providerId) external view returns (uint256);
