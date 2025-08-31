@@ -60,13 +60,15 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
 
     modifier onlyProvider(uint256 providerId) {
         SubscriptionServiceStorage storage $ = _getStorage();
-        if (!_isValidProvider(providerId)) revert Unauthorized();
+        if (!_isValidProvider(providerId) || $.providers[providerId].owner != _msgSender()) revert Unauthorized();
         _;
     }
 
     modifier onlySubscriber(uint256 subscriberId) {
         SubscriptionServiceStorage storage $ = _getStorage();
-        if (!_isValidSubscriber(subscriberId)) revert Unauthorized();
+        if (!_isValidSubscriber(subscriberId) || $.subscribers[subscriberId].owner != _msgSender()) {
+            revert Unauthorized();
+        }
         _;
     }
 
@@ -590,35 +592,32 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         // Skip if billing period hasn't ended yet
         if (currentTime < billingEndTime) return (0, 0, userBalance);
 
-        uint256 monthsPassedLocal;
-
         if (subscription.paused) {
             // If paused before billing end, no earnings
             if (subscription.pausedAt < billingEndTime) {
                 return (0, 0, userBalance);
             }
             // Calculate earnings up to pause time
-            monthsPassedLocal = Math.ceilDiv(subscription.pausedAt - billingEndTime, BILLING_PERIOD);
+            monthsPassed = Math.ceilDiv(subscription.pausedAt - billingEndTime, BILLING_PERIOD);
         } else {
             // Calculate earnings up to current time
-            monthsPassedLocal = Math.ceilDiv(currentTime - billingEndTime, BILLING_PERIOD);
+            monthsPassed = Math.ceilDiv(currentTime - billingEndTime, BILLING_PERIOD);
         }
-
-        if (monthsPassedLocal == 0) return (providerFee, 0, userBalance);
 
         // Calculate total earnings for past months
-        earnings = monthsPassedLocal * providerFee;
+        earnings = monthsPassed * providerFee;
 
         // Check if user has sufficient balance
-        if (userBalance < earnings && monthsPassedLocal > 1) {
+        if (userBalance < earnings && monthsPassed > 1) {
+            // If the 2nd month has started and the previous month was not processed,
+            // then we deduct the previous month's fee. Since, in this case the user
+            // does not have enough to cover 2nd month's fee or maybe even first month's fee
+            // we calculate how many pending month's fee we can deduct from him.
             uint256 affordableMonths = userBalance / providerFee;
             earnings = affordableMonths * providerFee;
-            // if 2 months has passed, and we need to deduct 200 tokens, but user 170 tokens, then we deduct one month's
-            // fee.
-            // 200/170 * 100 = 100
         }
 
-        return (earnings, monthsPassedLocal, remainingBalance);
+        return (earnings, monthsPassed, userBalance);
     }
 
     function _isValidProviderFee(uint256 _fee) internal view returns (bool) {
