@@ -60,20 +60,22 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
 
     modifier onlyProvider(uint256 providerId) {
         SubscriptionServiceStorage storage $ = _getStorage();
-        if ($.providers[providerId].owner != _msgSender()) revert Unauthorized();
+        if (!_isValidProvider(providerId)) revert Unauthorized();
         _;
     }
 
     modifier onlySubscriber(uint256 subscriberId) {
         SubscriptionServiceStorage storage $ = _getStorage();
-        if ($.subscribers[subscriberId].owner != _msgSender()) revert Unauthorized();
+        if (!_isValidSubscriber(subscriberId)) revert Unauthorized();
         _;
     }
 
-    function initialize(address _owner, address _weth) public initializer {
+    function initialize(address _owner, address _weth, address _priceFeed) public initializer {
         __Ownable_init(_owner);
         __UUPSUpgradeable_init();
-        _getStorage().WETH = IERC20(_weth);
+        SubscriptionServiceStorage storage $ = _getStorage();
+        $.WETH = IERC20(_weth);
+        $.priceFeed = AggregatorV3Interface(_priceFeed);
     }
 
     struct SubscriptionServiceStorage {
@@ -157,7 +159,10 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
             if (!provider.isActive) revert ProviderNotActive(providerId);
             // State changes
             requiredDeposit += provider.fee;
+            if (requiredDeposit > depositAmt) revert InsufficientDeposit(depositAmt, requiredDeposit);
+
             $.providerSubscribers[providerId].add(subscriberId);
+            $.providers[providerId].balance += provider.fee;
             $.subscriptions[subscriberId][providerId] = Subscription({
                 startTime: uint48(block.timestamp),
                 endTime: uint48(block.timestamp + BILLING_PERIOD),
@@ -170,7 +175,6 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
             }
         }
 
-        if (depositAmt < requiredDeposit) revert InsufficientDeposit(depositAmt, requiredDeposit);
         // Transfer funds to the contract
         $.WETH.safeTransferFrom(msgSender, address(this), depositAmt);
 
@@ -191,13 +195,13 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
      * there may be a chance that they lose their earnings for the month they didn't charged.
      * @param providerId The ID of the provider
      */
-    function collectEarnings(uint256 providerId) public onlyProvider(providerId) {
+    function processAllSubscriptions(uint256 providerId) public onlyProvider(providerId) {
         SubscriptionServiceStorage storage $ = _getStorage();
         uint256[] memory subscriberIds = $.providerSubscribers[providerId].values();
         uint256 providerFee = $.providers[providerId].fee;
 
         if (subscriberIds.length == 0) {
-            emit EarningsCollected(providerId, 0);
+            emit SubscriptionsProcesses(providerId, 0);
             return;
         }
 
@@ -207,6 +211,8 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         // Process each subscription to calculate earnings
         for (uint256 i = 0; i < subscriberIds.length;) {
             uint256 subscriberId = subscriberIds[i];
+            if (!_isValidSubscription(subscriberId, providerId)) continue;
+
             totalEarnings += _processSubscriptionEarnings(subscriberId, providerId, providerFee, currentTime);
 
             unchecked {
@@ -218,7 +224,33 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
             $.providers[providerId].balance += totalEarnings;
         }
 
-        emit EarningsCollected(providerId, totalEarnings);
+        emit SubscriptionsProcesses(providerId, totalEarnings);
+    }
+
+    /**
+     * @notice Process a specific subscription and collect earnings
+     * @dev Processes billing for a single subscriber-provider relationship
+     * @param subscriberId The ID of the subscriber
+     * @param providerId The ID of the provider
+     */
+    function processSubscription(uint256 subscriberId, uint256 providerId) public onlyProvider(providerId) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+
+        // Validate that the subscription exists
+        if (!_isValidSubscription(subscriberId, providerId)) revert InvalidSubscription(subscriberId, providerId);
+
+        uint256 providerFee = $.providers[providerId].fee;
+        uint256 currentTime = block.timestamp;
+
+        // Process the single subscription
+        uint256 earnings = _processSubscriptionEarnings(subscriberId, providerId, providerFee, currentTime);
+
+        // Update provider balance if earnings were collected
+        if (earnings > 0) {
+            $.providers[providerId].balance += earnings;
+        }
+
+        emit SubscriptionsProcesses(providerId, earnings);
     }
 
     /**
@@ -231,7 +263,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
      * @return nextStartIndex The next index to start from (0 if all processed)
      * @return isComplete Whether all subscribers have been processed
      */
-    function collectEarningsBatch(
+    function processSubscriptionsBatch(
         uint256 providerId,
         uint256 startIndex,
         uint256 batchSize
@@ -245,7 +277,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         {
             uint256[] memory subscriberIds = $.providerSubscribers[providerId].values();
             if (subscriberIds.length == 0 || startIndex >= subscriberIds.length) {
-                emit EarningsCollected(providerId, 0);
+                emit SubscriptionsProcesses(providerId, 0);
                 return (0, 0, true);
             }
 
@@ -256,6 +288,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
             // Processing the batch
             uint256 fee = $.providers[providerId].fee;
             for (uint256 i = startIndex; i < endIndex;) {
+                if (!_isValidSubscription(subscriberIds[i], providerId)) continue;
                 totalEarnings += _processSubscriptionEarnings(subscriberIds[i], providerId, fee, block.timestamp);
 
                 unchecked {
@@ -273,7 +306,7 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
             $.providers[providerId].balance += totalEarnings;
         }
 
-        emit EarningsCollected(providerId, totalEarnings);
+        emit SubscriptionsProcesses(providerId, totalEarnings);
     }
 
     function withdrawEarnings(uint256 _providerId, uint256 _amount) public onlyProvider(_providerId) {
@@ -305,18 +338,9 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     }
 
     /**
-     * @notice Check if a subscription is paused
-     * @param subscriberId The ID of the subscriber
-     * @param providerId The ID of the provider
-     * @return True if the subscription is paused, false otherwise
-     */
-    function isSubscriptionPaused(uint256 subscriberId, uint256 providerId) external view returns (bool) {
-        SubscriptionServiceStorage storage $ = _getStorage();
-        return $.subscriptions[subscriberId][providerId].paused;
-    }
-
-    /**
      * @notice Unregister a provider
+     * @dev Before calling this function, the provider should process all their subscriptions and collect all their
+     * earnings.
      * @param providerId The ID of the provider
      */
     function removeProvider(uint256 providerId) external onlyProvider(providerId) {
@@ -329,8 +353,16 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         // Remove all data for the provider
         $.providerSubscribers[providerId].clear();
         delete $.providers[providerId];
+        $.totalProviders--;
 
         emit ProviderUnregistered(providerId, msgSender);
+    }
+
+    function pauseSubscription(uint256 subscriberId, uint256 providerId) external onlySubscriber(subscriberId) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        $.subscriptions[subscriberId][providerId].paused = true;
+        $.subscriptions[subscriberId][providerId].pausedAt = uint48(block.timestamp);
+        emit SubscriptionPaused(subscriberId, providerId);
     }
 
     /**
@@ -375,7 +407,14 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
     }
 
     function resumeSubscription(uint256 subscriberId, uint256 providerId) external {
-        // TODO: Implement
+        /**
+         * 1. Validation checks
+         * 2. For a particular subscription, update the billing cycle start right now and ending after
+         * BILLING_PERIOD
+         * 3. Add the minimum deposit amount according to the subscription and the amount is then added to the
+         * provider's balance
+         * 4. Remaining stays in the subscriber's balance
+         */
         revert("Not implemented yet");
     }
 
@@ -470,6 +509,17 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
         return (subscriber.owner, subscriber.currentBalance);
     }
 
+    /**
+     * @notice Check if a subscription is paused
+     * @param subscriberId The ID of the subscriber
+     * @param providerId The ID of the provider
+     * @return True if the subscription is paused, false otherwise
+     */
+    function isSubscriptionPaused(uint256 subscriberId, uint256 providerId) external view returns (bool) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        return $.subscriptions[subscriberId][providerId].paused;
+    }
+
     ////////////////////////////////////////////////////////
     ////////////// INTERNAL/PRIVATE FUNCTIONS //////////////
     ////////////////////////////////////////////////////////
@@ -561,7 +611,8 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
 
         // Check if user has sufficient balance
         if (userBalance < earnings && monthsPassedLocal > 1) {
-            earnings = (earnings / userBalance) * providerFee;
+            uint256 affordableMonths = userBalance / providerFee;
+            earnings = affordableMonths * providerFee;
             // if 2 months has passed, and we need to deduct 200 tokens, but user 170 tokens, then we deduct one month's
             // fee.
             // 200/170 * 100 = 100
@@ -584,6 +635,21 @@ contract SubscriptionService is Initializable, OwnableUpgradeable, UUPSUpgradeab
 
     function _generateSubscriberId() private returns (uint256) {
         return ++_getStorage().nextSubscriberId;
+    }
+
+    function _isValidSubscription(uint256 subscriberId, uint256 providerId) private view returns (bool) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        return $.providerSubscribers[providerId].contains(subscriberId);
+    }
+
+    function _isValidProvider(uint256 providerId) private view returns (bool) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        return $.providers[providerId].owner != address(0);
+    }
+
+    function _isValidSubscriber(uint256 subscriberId) private view returns (bool) {
+        SubscriptionServiceStorage storage $ = _getStorage();
+        return $.subscribers[subscriberId].owner != address(0);
     }
 
     function _getStorage() private pure returns (SubscriptionServiceStorage storage $) {

@@ -30,8 +30,9 @@ interface ISubscriptionService {
     ////////////////////////
 
     event DepositIncreased(uint256 subscriberId, address owner, uint256 amount);
+    event SubscriptionPaused(uint256 subscriberId, uint256 providerId);
     event ProviderStatusChanged(uint256 providerId, bool status);
-    event EarningsCollected(uint256 providerId, uint256 amount);
+    event SubscriptionsProcesses(uint256 providerId, uint256 amount);
     event EarningsWithdrawn(uint256 providerId, uint256 amount, uint256 usdValue);
     event ProviderRegistered(uint256 providerId, address owner, uint256 fee);
     event SubscriberRegistered(uint256 subscriberId, address owner, uint256 depositAmt);
@@ -54,20 +55,23 @@ interface ISubscriptionService {
     error InsufficientDeposit(uint256 deposit, uint256 requiredDeposit);
     error ProviderNotActive(uint256 providerId);
     error Unauthorized();
+    error InvalidSubscription(uint256 subscriberId, uint256 providerId);
 
     ////////////////////////
-    ///// EXTERNAL API /////
+    ///// EXTERNAL FUNCTIONS /////
     ////////////////////////
 
     function registerProvider(bytes32 key, uint256 fee) external returns (uint256);
     function registerSubscriber(uint256[] memory providers, uint256 depositAmt) external returns (uint256);
-    // function increaseDeposit(uint256 amt) external;
+    function increaseDeposit(uint256 subscriberId, uint256 amt) external;
+    function pauseSubscription(uint256 subscriberId, uint256 providerId) external;
     function removeProvider(uint256 providerId) external;
     function changeProviderStatus(uint256 providerId) external;
     function subscribe(uint256 providerId, uint256 depositAmt) external;
     function unsubscribe(uint256 providerId) external;
-    function collectEarnings(uint256 providerId) external;
-    function collectEarningsBatch(
+    function processSubscription(uint256 subscriberId, uint256 providerId) external;
+    function processAllSubscriptions(uint256 providerId) external;
+    function processSubscriptionsBatch(
         uint256 providerId,
         uint256 startIndex,
         uint256 batchSize
