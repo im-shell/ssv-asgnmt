@@ -15,6 +15,8 @@ I chose integers to be the unique IDs for the users simply because they are chea
 ### Storing data for providers and subscribers
 The requiremente only asked us to keep track of subscribers list for providers so I've only create an enumerable set for providers to subscribers and not vice-versa. The enumerable set allows you to do multiple actions like getting the list of subs, check if a value exists in O(1) and remove too. That's why I chose that.
 
+> Note: The mappings `ownerToProviderId` and `ownerToSubscriberId` are merely for read-only purpose and can be removed in production when we adjust a few things.
+
 ### Subscription model fee calculations
 
 The trickiest part of the whole architecture. Here the main challenge for me was to interpret the requirements. Here is what I've understood from the requirements:
